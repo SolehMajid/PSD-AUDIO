@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Audio Monitoring & Detection - Sawmill vs Non-Sawmill</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #080d16;
+            --bg-surface: #0f172a;
+            --bg-card: rgba(15, 23, 42, 0.78);
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-glow: rgba(56, 189, 248, 0.3);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent-cyan: #06b6d4;
+            --accent-blue: #3b82f6;
+            --sawmil-red: #ef4444;
+            --sawmil-bg: rgba(239, 68, 68, 0.12);
+            --sawmil-glow: rgba(239, 68, 68, 0.45);
+            --nonsawmil-green: #10b981;
+            --nonsawmil-bg: rgba(16, 185, 129, 0.12);
+            --nonsawmil-glow: rgba(16, 185, 129, 0.45);
+            --font-main: 'Plus Jakarta Sans', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            font-family: var(--font-main);
+            min-height: 100vh;
+            background-image: 
+                radial-gradient(circle at 10% 15%, rgba(59, 130, 246, 0.12) 0%, transparent 45%),
+                radial-gradient(circle at 90% 85%, rgba(6, 182, 212, 0.08) 0%, transparent 45%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 24px 16px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1180px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* HEADER */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+            padding: 8px 0 16px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .brand-block h1 {
+            font-size: 1.85rem;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, #ffffff 40%, #94a3b8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .brand-block p {
+            color: var(--text-secondary);
+            font-size: 0.88rem;
+            margin-top: 4px;
+        }
+
+        .header-meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .pill-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-subtle);
+            font-size: 0.8rem;
+            font-family: var(--font-mono);
+            color: var(--text-secondary);
+        }
+
+        .indicator-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #64748b;
+        }
+
+        .indicator-dot.active {
+            background: #10b981;
+            box-shadow: 0 0 10px #10b981;
+            animation: pulse-dot 1.5s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* DASHBOARD GRID */
+        .grid-layout {
+            display: grid;
+            grid-template-columns: 1.15fr 0.85fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 920px) {
+            .grid-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel-card {
+            background: var(--bg-card);
+            backdrop-filter: blur(18px);
+            border: 1px solid var(--border-subtle);
+            border-radius: 18px;
+            padding: 22px;
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            position: relative;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .panel-title {
+            font-size: 1rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #e2e8f0;
+        }
+
+        /* PRIMARY PREDICTION BANNER (STABLE PREDICTION) */
+        .prediction-hero-box {
+            padding: 26px 20px;
+            border-radius: 16px;
+            text-align: center;
+            border: 2px solid rgba(255, 255, 255, 0.08);
+            background: rgba(15, 23, 42, 0.6);
+            transition: all 0.35s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .prediction-hero-box.sawmil {
+            border-color: var(--sawmil-red);
+            background: radial-gradient(circle at 50% 50%, var(--sawmil-bg) 0%, rgba(15, 23, 42, 0.85) 100%);
+            box-shadow: 0 0 35px var(--sawmil-glow);
+        }
+
+        .prediction-hero-box.nonsawmil {
+            border-color: var(--nonsawmil-green);
+            background: radial-gradient(circle at 50% 50%, var(--nonsawmil-bg) 0%, rgba(15, 23, 42, 0.85) 100%);
+            box-shadow: 0 0 35px var(--nonsawmil-glow);
+        }
+
+        .pred-tagline {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+
+        .pred-icon {
+            font-size: 3.2rem;
+            margin-bottom: 6px;
+            line-height: 1;
+        }
+
+        .pred-label {
+            font-size: 2rem;
+            font-weight: 800;
+            letter-spacing: -0.01em;
+            margin-bottom: 4px;
+        }
+
+        .pred-sub {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+        }
+
+        .pred-sub span {
+            color: #ffffff;
+            font-weight: 700;
+            font-family: var(--font-mono);
+        }
+
+        /* DUAL PREDICTION BADGES (INSTANT VS STABLE) */
+        .dual-pred-bar {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .pred-badge-card {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 12px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .pred-badge-card .badge-title {
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .pred-badge-card .badge-value {
+            font-size: 1.1rem;
+            font-weight: 800;
+            font-family: var(--font-mono);
+        }
+
+        /* OSCILLOSCOPE CANVAS */
+        .visualizer-container {
+            position: relative;
+            width: 100%;
+            height: 120px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        canvas#oscilloscope {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .canvas-overlay-tag {
+            position: absolute;
+            top: 6px;
+            left: 10px;
+            font-size: 0.72rem;
+            font-family: var(--font-mono);
+            color: #64748b;
+            pointer-events: none;
+        }
+
+        /* AUDIO LEVEL & RMS METERS */
+        .level-meter-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .level-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+        }
+
+        .level-bar-track {
+            width: 100%;
+            height: 10px;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 999px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .level-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #10b981 0%, #f59e0b 70%, #ef4444 100%);
+            border-radius: 999px;
+            transition: width 0.12s linear;
+        }
+
+        /* PROBABILITY BAR */
+        .prob-split-track {
+            height: 12px;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 999px;
+            overflow: hidden;
+            display: flex;
+        }
+
+        .prob-fill-saw {
+            height: 100%;
+            background: var(--sawmil-red);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .prob-fill-non {
+            height: 100%;
+            background: var(--nonsawmil-green);
+            width: 100%;
+            transition: width 0.3s ease;
+        }
+
+        /* CONTROLS */
+        .action-row {
+            display: grid;
+            grid-template-columns: 1.4fr 1fr;
+            gap: 12px;
+        }
+
+        .btn-action {
+            appearance: none;
+            border: none;
+            padding: 14px 18px;
+            border-radius: 12px;
+            font-family: var(--font-main);
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            transition: all 0.25s ease;
+        }
+
+        .btn-stream-toggle {
+            background: linear-gradient(135deg, #0284c7, #2563eb);
+            color: #ffffff;
+            box-shadow: 0 4px 18px rgba(37, 99, 235, 0.4);
+        }
+
+        .btn-stream-toggle.streaming {
+            background: rgba(239, 68, 68, 0.18);
+            border: 1px solid #ef4444;
+            color: #fca5a5;
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+        }
+
+        /* REALTIME TIMELINE CHART (SVG) */
+        .chart-wrapper {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 12px;
+            height: 140px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            font-family: var(--font-mono);
+            color: var(--text-muted);
+        }
+
+        svg#timelineChart {
+            width: 100%;
+            height: 90px;
+            overflow: visible;
+        }
+
+        /* TELEMETRY STATS */
+        .telemetry-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .telemetry-card {
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            padding: 10px 12px;
+        }
+
+        .telemetry-card .t-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .telemetry-card .t-val {
+            font-size: 1.1rem;
+            font-weight: 700;
+            font-family: var(--font-mono);
+            color: #38bdf8;
+            margin-top: 2px;
+        }
+
+        /* MIC GAIN CONTROL */
+        .gain-control {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 10px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .gain-control label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .gain-control input[type="range"] {
+            flex: 1;
+            accent-color: #38bdf8;
+        }
+
+        footer {
+            margin-top: 10px;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <!-- HEADER -->
+        <header>
+            <div class="brand-block">
+                <h1>Live Acoustic Monitoring System</h1>
+                <p>Klasifikasi Suara Mesin Sawmill vs Lingkungan secara Kontinu & Real-Time</p>
+            </div>
+            <div class="header-meta">
+                <div class="pill-badge">
+                    <span id="streamDot" class="indicator-dot"></span>
+                    <span id="streamStatusText">Streaming Nonaktif</span>
+                </div>
+                <div class="pill-badge">
+                    <span>Window: 2.5s / Hop: 0.5s</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- DASHBOARD GRID -->
+        <div class="grid-layout">
+
+            <!-- PANEL KIRI: STREAMING & AUDIO INPUT -->
+            <div class="panel-card">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <span>🎙️</span> Live Audio Input Stream
+                    </div>
+                    <div id="micInfo" style="font-family: var(--font-mono); font-size: 0.8rem; color: #38bdf8;">MIC SIAGA</div>
+                </div>
+
+                <!-- OSCILLOSCOPE CANVAS -->
+                <div class="visualizer-container">
+                    <div class="canvas-overlay-tag">
+                        <span>OSCILLOSCOPE (22050 Hz)</span>
+                    </div>
+                    <canvas id="oscilloscope"></canvas>
+                </div>
+
+                <!-- AUDIO LEVEL METER -->
+                <div class="level-meter-wrapper">
+                    <div class="level-labels">
+                        <span>Audio Level (RMS)</span>
+                        <span id="rmsText">0.0000</span>
+                    </div>
+                    <div class="level-bar-track">
+                        <div id="rmsBar" class="level-bar-fill"></div>
+                    </div>
+                </div>
+
+                <!-- SENSITIVITY / SOFTWARE GAIN -->
+                <div class="gain-control">
+                    <label for="gainSlider">Sensitivitas Mikrofon (HP):</label>
+                    <input type="range" id="gainSlider" min="1" max="5" step="0.5" value="2.5">
+                    <span id="gainValue" style="font-family: var(--font-mono); font-size: 0.85rem; color: #38bdf8;">2.5x</span>
+                </div>
+
+                <!-- CONTROLS -->
+                <div class="action-row">
+                    <button id="btnToggleStreaming" class="btn-action btn-stream-toggle">
+                        <span id="btnIcon">▶️</span> <span id="btnLabel">Mulai Monitoring Kontinu</span>
+                    </button>
+                    <button id="btnResetState" class="btn-action btn-secondary">
+                        <span>🔄</span> Reset State
+                    </button>
+                </div>
+
+                <!-- PANDUAN PENGUJIAN -->
+                <div style="padding: 12px 14px; border-radius: 10px; background: rgba(56, 189, 248, 0.05); border: 1px solid rgba(56, 189, 248, 0.15); font-size: 0.82rem; color: #7dd3fc; line-height: 1.5;">
+                    💡 <strong>Cara Pengujian Suara Sawmill dari HP:</strong><br>
+                    1. Klik <strong>"Mulai Monitoring Kontinu"</strong> dan izinkan akses mikrofon.<br>
+                    2. Putar audio gergaji mesin dari HP di dekat mikrofon laptop (jarak 10–30 cm).<br>
+                    3. Sistem menerapkan <strong>Sliding Window 2.5s</strong> dan <strong>AGC Normalization</strong> otomatis sehingga suara HP langsung terdeteksi tanpa terputus.
+                </div>
+            </div>
+
+            <!-- PANEL KANAN: HASIL DETEKSI & STABILISASI -->
+            <div class="panel-card">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <span>⚡</span> Klasifikasi & Stabilisasi Real-Time
+                    </div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">Model: LightGBM</div>
+                </div>
+
+                <!-- STABLE PREDICTION HERO BANNER -->
+                <div id="stableBanner" class="prediction-hero-box">
+                    <div class="pred-tagline">STABLE PREDICTION (TEMPORAL FILTERED)</div>
+                    <div id="stableIcon" class="pred-icon">🎧</div>
+                    <div id="stableLabel" class="pred-label" style="color: #94a3b8;">Menunggu Audio...</div>
+                    <div id="stableSub" class="pred-sub">Keyakinan: <span>0.0%</span></div>
+                </div>
+
+                <!-- DUAL PREDICTION BADGES -->
+                <div class="dual-pred-bar">
+                    <div class="pred-badge-card">
+                        <div class="badge-title">Instant Prediction</div>
+                        <div id="instantLabel" class="badge-value" style="color: #94a3b8;">-</div>
+                    </div>
+                    <div class="pred-badge-card">
+                        <div class="badge-title">Status Deteksi</div>
+                        <div id="acousticStateLabel" class="badge-value" style="color: #38bdf8;">Hening</div>
+                    </div>
+                </div>
+
+                <!-- PROBABILITY SPLIT METER -->
+                <div>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.8rem; font-weight: 700; margin-bottom: 6px;">
+                        <span style="color: #f87171;">Sawmill: <span id="probSawText">0.0%</span></span>
+                        <span style="color: #34d399;">Non-Sawmill: <span id="probNonText">100.0%</span></span>
+                    </div>
+                    <div class="prob-split-track">
+                        <div id="barSaw" class="prob-fill-saw"></div>
+                        <div id="barNon" class="prob-fill-non"></div>
+                    </div>
+                </div>
+
+                <!-- REALTIME PROBABILITY TIMELINE (SVG CHART) -->
+                <div class="chart-wrapper">
+                    <div class="chart-header">
+                        <span>TIMELINE PROBABILITAS SAWMILL (30 DETIK TERAKHIR)</span>
+                        <span id="chartLatestVal">0.0%</span>
+                    </div>
+                    <svg id="timelineChart" viewBox="0 0 300 80" preserveAspectRatio="none">
+                        <!-- Threshold line 50% -->
+                        <line x1="0" y1="40" x2="300" y2="40" stroke="rgba(255,255,255,0.15)" stroke-dasharray="4" stroke-width="1"/>
+                        <path id="chartPath" d="M 0 80 L 300 80" fill="rgba(239, 68, 68, 0.12)" stroke="#ef4444" stroke-width="2"/>
+                    </svg>
+                </div>
+
+                <!-- TELEMETRI AKUSTIK LIBROSA -->
+                <div class="telemetry-grid">
+                    <div class="telemetry-card">
+                        <div class="t-label">Spectral Centroid</div>
+                        <div id="valCentroid" class="t-val">- Hz</div>
+                    </div>
+                    <div class="telemetry-card">
+                        <div class="t-label">Spectral Rolloff</div>
+                        <div id="valRolloff" class="t-val">- Hz</div>
+                    </div>
+                    <div class="telemetry-card">
+                        <div class="t-label">Zero Crossing Rate</div>
+                        <div id="valZCR" class="t-val">-</div>
+                    </div>
+                    <div class="telemetry-card">
+                        <div class="t-label">Spectral Bandwidth</div>
+                        <div id="valBandwidth" class="t-val">- Hz</div>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+        <footer>
+            Real-Time Audio Stream & ML Inference Engine &bull; Sliding Window 2.5s / 0.5s Hop
+        </footer>
+    </div>
+
+    <!-- JAVASCRIPT STREAMING & DASHBOARD LOGIC -->
+    <script>
+        // State Variabel Audio
+        let audioContext = null;
+        let mediaStream = null;
+        let scriptProcessor = null;
+        let analyser = null;
+        let isStreaming = false;
+        let softwareGain = 2.5;
+
+        // Buffer pengumpul potongan kecil (dikirim tiap 500ms)
+        let chunkBuffer = [];
+        let chunkTimer = null;
+        const TARGET_SAMPLE_RATE = 22050;
+
+        // Elemen DOM
+        const btnToggleStreaming = document.getElementById('btnToggleStreaming');
+        const btnIcon = document.getElementById('btnIcon');
+        const btnLabel = document.getElementById('btnLabel');
+        const btnResetState = document.getElementById('btnResetState');
+        const streamDot = document.getElementById('streamDot');
+        const streamStatusText = document.getElementById('streamStatusText');
+        const micInfo = document.getElementById('micInfo');
+
+        const oscilloscope = document.getElementById('oscilloscope');
+        const oscCtx = oscilloscope.getContext('2d');
+        const rmsBar = document.getElementById('rmsBar');
+        const rmsText = document.getElementById('rmsText');
+        const gainSlider = document.getElementById('gainSlider');
+        const gainValue = document.getElementById('gainValue');
+
+        const stableBanner = document.getElementById('stableBanner');
+        const stableIcon = document.getElementById('stableIcon');
+        const stableLabel = document.getElementById('stableLabel');
+        const stableSub = document.getElementById('stableSub');
+
+        const instantLabel = document.getElementById('instantLabel');
+        const acousticStateLabel = document.getElementById('acousticStateLabel');
+        const probSawText = document.getElementById('probSawText');
+        const probNonText = document.getElementById('probNonText');
+        const barSaw = document.getElementById('barSaw');
+        const barNon = document.getElementById('barNon');
+
+        const chartPath = document.getElementById('chartPath');
+        const chartLatestVal = document.getElementById('chartLatestVal');
+
+        const valCentroid = document.getElementById('valCentroid');
+        const valRolloff = document.getElementById('valRolloff');
+        const valZCR = document.getElementById('valZCR');
+        const valBandwidth = document.getElementById('valBandwidth');
+
+        // History titik grafik
+        let timelineData = [];
+
+        // Resize Canvas Oscilloscope
+        function resizeOscilloscope() {
+            oscilloscope.width = oscilloscope.parentElement.clientWidth;
+            oscilloscope.height = oscilloscope.parentElement.clientHeight;
+        }
+        window.addEventListener('resize', resizeOscilloscope);
+        resizeOscilloscope();
+
+        // Gain Slider
+        gainSlider.addEventListener('input', (e) => {
+            softwareGain = parseFloat(e.target.value);
+            gainValue.innerText = softwareGain.toFixed(1) + 'x';
+        });
+
+        // 1. Inisialisasi Audio Stream Mikrofon
+        async function startStreaming() {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: TARGET_SAMPLE_RATE });
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+
+                // Ambil stream mic tanpa noise cancellation bawaan agar suara mesin tidak diredam OS
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+
+                const source = audioContext.createMediaStreamSource(mediaStream);
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 512;
+                source.connect(analyser);
+
+                // ScriptProcessorNode untuk streaming PCM
+                scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+                scriptProcessor.onaudioprocess = (e) => {
+                    if (!isStreaming) return;
+                    const inputChannel = e.inputBuffer.getChannelData(0);
+                    // Terapkan software gain
+                    const boosted = new Float32Array(inputChannel.length);
+                    for (let i = 0; i < inputChannel.length; i++) {
+                        boosted[i] = Math.max(-1.0, Math.min(1.0, inputChannel[i] * softwareGain));
+                    }
+                    chunkBuffer.push(boosted);
+                };
+
+                source.connect(scriptProcessor);
+                scriptProcessor.connect(audioContext.destination);
+
+                isStreaming = true;
+                btnToggleStreaming.classList.add('streaming');
+                btnIcon.innerText = '⏹️';
+                btnLabel.innerText = 'Hentikan Monitoring';
+                streamDot.className = 'indicator-dot active';
+                streamStatusText.innerText = 'Streaming Aktif (22050 Hz)';
+                micInfo.innerText = 'MIKROFON AKTIF';
+
+                drawVisualizer();
+
+                // Kirim potongan audio tiap 500 ms (0.5s HOP)
+                chunkTimer = setInterval(sendAudioChunkToServer, 500);
+
+            } catch (err) {
+                console.error("Gagal start mic:", err);
+                alert("Tidak dapat mengakses mikrofon: " + err.message);
+                stopStreaming();
+            }
+        }
+
+        function stopStreaming() {
+            isStreaming = false;
+            clearInterval(chunkTimer);
+
+            if (scriptProcessor) {
+                scriptProcessor.disconnect();
+                scriptProcessor = null;
+            }
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+
+            btnToggleStreaming.classList.remove('streaming');
+            btnIcon.innerText = '▶️';
+            btnLabel.innerText = 'Mulai Monitoring Kontinu';
+            streamDot.className = 'indicator-dot';
+            streamStatusText.innerText = 'Streaming Nonaktif';
+            micInfo.innerText = 'MIC SIAGA';
+        }
+
+        // Toggle Tombol
+        btnToggleStreaming.addEventListener('click', () => {
+            if (!isStreaming) {
+                startStreaming();
+            } else {
+                stopStreaming();
+            }
+        });
+
+        // 2. Encoder WAV Cepat di Memori
+        function encodeWAV16Bit(floatSamples, sampleRate) {
+            const buffer = new ArrayBuffer(44 + floatSamples.length * 2);
+            const view = new DataView(buffer);
+
+            function writeString(view, offset, string) {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            }
+
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + floatSamples.length * 2, true);
+            writeString(view, 8, 'WAVE');
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true); // PCM
+            view.setUint16(22, 1, true); // Mono
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeString(view, 36, 'data');
+            view.setUint32(40, floatSamples.length * 2, true);
+
+            let offset = 44;
+            for (let i = 0; i < floatSamples.length; i++) {
+                let s = Math.max(-1, Math.min(1, floatSamples[i]));
+                view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+                offset += 2;
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+        // 3. Kirim Chunk ke Server Flask (Sliding Ring Buffer)
+        async function sendAudioChunkToServer() {
+            if (!isStreaming || chunkBuffer.length === 0) return;
+
+            const buffersToProcess = [...chunkBuffer];
+            chunkBuffer = [];
+
+            let totalLen = buffersToProcess.reduce((sum, b) => sum + b.length, 0);
+            let merged = new Float32Array(totalLen);
+            let offset = 0;
+            for (let b of buffersToProcess) {
+                merged.set(b, offset);
+                offset += b.length;
+            }
+
+            const wavBlob = encodeWAV16Bit(merged, TARGET_SAMPLE_RATE);
+            const formData = new FormData();
+            formData.append('audio', wavBlob, 'chunk.wav');
+
+            try {
+                const response = await fetch('/api/stream_chunk', {
+                    method: 'POST',
+                    body: formData
+                });
+                const res = await response.json();
+                if (res.success) {
+                    updateDashboardUI(res);
+                }
+            } catch (err) {
+                console.warn("Chunk send error:", err);
+            }
+        }
+
+        // 4. Update Tampilan Dashboard Real-Time
+        function updateDashboardUI(data) {
+            const stbl = data.stable_prediction;
+            const inst = data.instant_prediction;
+            const isSawmil = (stbl === 'Sawmill');
+            const conf = data.confidence;
+            const pSaw = data.prob_sawmil;
+            const pNon = data.prob_nonsawmil;
+            const rms = data.rms;
+            const isSilent = data.is_silent;
+
+            // Update Primary Banner
+            stableBanner.className = 'prediction-hero-box ' + (isSawmil ? 'sawmil' : 'nonsawmil');
+            stableIcon.innerText = isSawmil ? '⚠️' : '🛡️';
+            stableLabel.innerText = isSawmil ? 'SUARA SAWMIL (MESIN GERGAJI)' : 'SUARA NON-SAWMIL (LINGKUNGAN)';
+            stableLabel.style.color = isSawmil ? '#f87171' : '#34d399';
+            stableSub.innerHTML = `Keyakinan Stabil: <span>${conf}%</span>`;
+
+            // Dual Badges
+            instantLabel.innerText = inst;
+            instantLabel.style.color = (inst === 'Sawmill') ? '#f87171' : '#34d399';
+
+            if (isSilent) {
+                acousticStateLabel.innerText = 'Hening / Senyap';
+                acousticStateLabel.style.color = '#94a3b8';
+            } else {
+                acousticStateLabel.innerText = 'Suara Aktif';
+                acousticStateLabel.style.color = '#38bdf8';
+            }
+
+            // Probability Split
+            probSawText.innerText = `${pSaw}%`;
+            probNonText.innerText = `${pNon}%`;
+            barSaw.style.width = `${pSaw}%`;
+            barNon.style.width = `${pNon}%`;
+
+            // RMS Level Meter
+            rmsText.innerText = rms.toFixed(4);
+            const meterPct = Math.min(100, Math.round((rms / 0.15) * 100));
+            rmsBar.style.width = `${meterPct}%`;
+
+            // Librosa Telemetry Stats
+            if (data.stats) {
+                valCentroid.innerText = `${data.stats.centroid} Hz`;
+                valRolloff.innerText = `${data.stats.rolloff} Hz`;
+                valZCR.innerText = data.stats.zcr;
+                valBandwidth.innerText = `${data.stats.bandwidth} Hz`;
+            }
+
+            // Timeline Chart Data
+            timelineData.push(pSaw);
+            if (timelineData.length > 30) timelineData.shift();
+            renderTimelineChart();
+        }
+
+        // 5. Render SVG Timeline Chart
+        function renderTimelineChart() {
+            if (timelineData.length < 2) return;
+            const w = 300;
+            const h = 80;
+            const step = w / (Math.max(timelineData.length - 1, 1));
+
+            let pathD = `M 0 ${h - (timelineData[0] / 100) * h}`;
+            for (let i = 1; i < timelineData.length; i++) {
+                const x = i * step;
+                const y = h - (timelineData[i] / 100) * h;
+                pathD += ` L ${x} ${y}`;
+            }
+
+            chartPath.setAttribute('d', pathD);
+            chartLatestVal.innerText = `${timelineData[timelineData.length - 1]}%`;
+        }
+
+        // 6. Visualizer Oscilloscope
+        function drawVisualizer() {
+            if (!isStreaming) return;
+            requestAnimationFrame(drawVisualizer);
+            if (!analyser) return;
+
+            const bufferLen = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLen);
+            analyser.getByteTimeDomainData(dataArray);
+
+            oscCtx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+            oscCtx.fillRect(0, 0, oscilloscope.width, oscilloscope.height);
+
+            oscCtx.lineWidth = 2.5;
+            oscCtx.strokeStyle = (stableBanner.classList.contains('sawmil')) ? '#ef4444' : '#06b6d4';
+            oscCtx.beginPath();
+
+            const sliceWidth = oscilloscope.width / bufferLen;
+            let x = 0;
+
+            for (let i = 0; i < bufferLen; i++) {
+                const v = dataArray[i] / 128.0;
+                const y = (v * oscilloscope.height) / 2;
+
+                if (i === 0) {
+                    oscCtx.moveTo(x, y);
+                } else {
+                    oscCtx.lineTo(x, y);
+                }
+                x += sliceWidth;
+            }
+
+            oscCtx.lineTo(oscilloscope.width, oscilloscope.height / 2);
+            oscCtx.stroke();
+        }
+
+        // Reset Button
+        btnResetState.addEventListener('click', async () => {
+            try {
+                await fetch('/api/reset', { method: 'POST' });
+                timelineData = [];
+                renderTimelineChart();
+                stableBanner.className = 'prediction-hero-box';
+                stableIcon.innerText = '🎧';
+                stableLabel.innerText = 'Menunggu Audio...';
+                stableLabel.style.color = '#94a3b8';
+                stableSub.innerHTML = 'Keyakinan Stabil: <span>0.0%</span>';
+                instantLabel.innerText = '-';
+                acousticStateLabel.innerText = 'Hening';
+                barSaw.style.width = '0%';
+                barNon.style.width = '100%';
+                probSawText.innerText = '0.0%';
+                probNonText.innerText = '100.0%';
+            } catch (e) {
+                console.error(e);
+            }
+        });
+    </script>
+</body>
+</html>

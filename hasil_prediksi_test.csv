@@ -1,0 +1,3 @@
+filename,prediksi,confidence,prob_sawmil,prob_nonsawmil,spectral_centroid,zcr
+gergaji.mp3,SAWMIL,76.48,76.48,23.52,3013.5,0.1495
+just dance.mp3,NON SAWMIL,86.52,13.48,86.52,2485.3,0.1362
