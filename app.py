@@ -12,7 +12,12 @@ import pandas as pd
 import soundfile as sf
 import librosa
 import joblib
+import requests
+from dotenv import load_dotenv
 from flask import Flask, render_template, request, jsonify
+
+# Muat variabel environment dari .env jika ada
+load_dotenv()
 
 # Pastikan console stdout UTF-8 pada Windows
 if hasattr(sys.stdout, 'reconfigure'):
@@ -36,6 +41,86 @@ GAIN_BOOST = 1.0             # Default software gain multiplier
 
 MODEL_FILE = 'model_terbaik_klasifikasi_audio.joblib'
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), MODEL_FILE)
+
+# ==============================================================================
+# KONFIGURASI NOTIFIKASI WHATSAPP (Aman: Dimuat dari .env)
+# ==============================================================================
+WA_NOTIFICATION_ENABLED = os.environ.get("WA_NOTIFICATION_ENABLED", "True").lower() in ("true", "1", "t")
+WA_METHOD = os.environ.get("WA_METHOD", "webhook")  # "webhook" atau "fonnte"
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
+FONNTE_TOKEN = os.environ.get("FONNTE_TOKEN", "")
+WA_TARGET_PHONE = os.environ.get("WA_TARGET_PHONE", "")   # Dimuat dari file .env (aman dari GitHub)
+
+SAWMILL_TRIGGER_DURATION = 10.0   # Butuh minimal 10 detik terdeteksi Sawmill kontinu
+NOTIFICATION_COOLDOWN = 120.0     # Jeda 2 menit antar notifikasi agar tidak spam
+
+wa_state = {
+    'sawmill_start_time': None,
+    'consecutive_seconds': 0.0,
+    'alert_sent_for_session': False,
+    'last_alert_time': 0.0,
+    'last_status_message': 'Siaga',
+}
+wa_lock = threading.Lock()
+
+def send_whatsapp_alert(duration, confidence, prob_sawmil, rms):
+    """Mengirim notifikasi WhatsApp ke webhook/gateway secara asinkron (background thread)."""
+    def _worker():
+        now_str = time.strftime("%Y-%m-%d %H:%M:%S")
+        pesan = (
+            f"🚨 *PERINGATAN AKUSTIK: SUARA SAWMILL TERDETEKSI* 🚨\n\n"
+            f"Sistem mendeteksi suara mesin gergaji (Sawmill) secara kontinu selama lebih dari *{int(duration)} detik*.\n\n"
+            f"📊 *Detail Deteksi:*\n"
+            f"• Waktu: {now_str}\n"
+            f"• Durasi Terdeteksi: {duration:.1f} detik\n"
+            f"• Keyakinan Model: {confidence}%\n"
+            f"• Probabilitas Sawmill: {prob_sawmil}%\n"
+            f"• Intensitas Audio (RMS): {rms}\n\n"
+            f"⚠️ _Pesan otomatis dikirim oleh Sistem Pemantauan Akustik Real-Time._"
+        )
+
+        try:
+            print(f"[WA NOTIF] Mengirim notifikasi WhatsApp via {WA_METHOD}...", flush=True)
+            if WA_METHOD == "webhook":
+                payload = {
+                    "secret_key": WEBHOOK_SECRET,
+                    "target": WA_TARGET_PHONE,
+                    "pesan": pesan,
+                    "secret": WEBHOOK_SECRET,
+                    "message": pesan
+                }
+                if WA_TARGET_PHONE:
+                    payload["phone"] = WA_TARGET_PHONE
+                    payload["to"] = WA_TARGET_PHONE
+
+                headers = {
+                    "Content-Type": "application/json",
+                    "X-Secret-Key": WEBHOOK_SECRET,
+                    "Authorization": f"Bearer {WEBHOOK_SECRET}"
+                }
+                resp = requests.post(WEBHOOK_URL, json=payload, headers=headers, timeout=10)
+                print(f"[WA NOTIF] Webhook response ({resp.status_code}): {resp.text[:200]}", flush=True)
+                with wa_lock:
+                    wa_state['last_status_message'] = f"Terkirim ({time.strftime('%H:%M:%S')})"
+
+            elif WA_METHOD == "fonnte":
+                headers = {"Authorization": FONNTE_TOKEN}
+                payload = {
+                    "target": WA_TARGET_PHONE,
+                    "message": pesan
+                }
+                resp = requests.post("https://api.fonnte.com/send", data=payload, headers=headers, timeout=10)
+                print(f"[WA NOTIF] Fonnte response ({resp.status_code}): {resp.text[:200]}", flush=True)
+                with wa_lock:
+                    wa_state['last_status_message'] = f"Terkirim ({time.strftime('%H:%M:%S')})"
+
+        except Exception as err:
+            print(f"[WA NOTIF ERROR] Gagal mengirim WhatsApp: {err}", flush=True)
+            with wa_lock:
+                wa_state['last_status_message'] = f"Gagal: {str(err)[:25]}"
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 # 74 Kolom fitur persis sesuai model training
 FEATURE_COLUMNS = [
@@ -167,6 +252,8 @@ system_state = {
     'confidence': 0.0,
     'prob_sawmil': 0.0,
     'prob_nonsawmil': 100.0,
+    'sawmill_duration': 0.0,
+    'wa_status': 'Siaga',
     'rms': 0.0,
     'is_silent': True,
     'stats': {
@@ -274,6 +361,29 @@ def run_inference_on_window(audio_window):
         prob_non_pct = round((1.0 - smooth_p) * 100, 1)
         conf_val = prob_saw_pct if stbl_label == "Sawmill" else prob_non_pct
 
+        # Evaluasi Durasi Deteksi Sawmill Kontinu untuk Notifikasi WhatsApp (>= 10 detik)
+        now_time = time.time()
+        if WA_NOTIFICATION_ENABLED and stbl_label == "Sawmill" and not is_silent:
+            with wa_lock:
+                if wa_state['sawmill_start_time'] is None:
+                    wa_state['sawmill_start_time'] = now_time
+
+                sawmill_duration = round(now_time - wa_state['sawmill_start_time'], 1)
+                wa_state['consecutive_seconds'] = sawmill_duration
+
+                cooldown_passed = (now_time - wa_state['last_alert_time']) >= NOTIFICATION_COOLDOWN
+                if sawmill_duration >= SAWMILL_TRIGGER_DURATION and (not wa_state['alert_sent_for_session'] or cooldown_passed):
+                    wa_state['alert_sent_for_session'] = True
+                    wa_state['last_alert_time'] = now_time
+                    wa_state['last_status_message'] = f"Mengirim notif ({sawmill_duration}s)..."
+                    print(f"[ALERT] Sawmill terdeteksi kontinu {sawmill_duration}s! Mengirim notifikasi WhatsApp...", flush=True)
+                    send_whatsapp_alert(sawmill_duration, conf_val, prob_saw_pct, round(raw_rms, 4))
+        else:
+            with wa_lock:
+                wa_state['sawmill_start_time'] = None
+                wa_state['consecutive_seconds'] = 0.0
+                wa_state['alert_sent_for_session'] = False
+
         # Perbarui Global System State untuk Web Dashboard
         with state_lock:
             system_state['status'] = 'Aktif Memantau'
@@ -283,6 +393,9 @@ def run_inference_on_window(audio_window):
             system_state['confidence'] = conf_val
             system_state['prob_sawmil'] = prob_saw_pct
             system_state['prob_nonsawmil'] = prob_non_pct
+            with wa_lock:
+                system_state['sawmill_duration'] = wa_state['consecutive_seconds']
+                system_state['wa_status'] = wa_state['last_status_message']
             system_state['rms'] = round(raw_rms, 4)
             system_state['is_silent'] = is_silent
             system_state['stats'] = {
@@ -421,6 +534,8 @@ def stream_chunk():
                 'confidence': system_state['confidence'],
                 'prob_sawmil': system_state['prob_sawmil'],
                 'prob_nonsawmil': system_state['prob_nonsawmil'],
+                'sawmill_duration': system_state.get('sawmill_duration', 0.0),
+                'wa_status': system_state.get('wa_status', 'Siaga'),
                 'rms': system_state['rms'],
                 'is_silent': system_state['is_silent'],
                 'stats': system_state['stats'],
@@ -444,6 +559,8 @@ def get_live_state():
             'confidence': system_state['confidence'],
             'prob_sawmil': system_state['prob_sawmil'],
             'prob_nonsawmil': system_state['prob_nonsawmil'],
+            'sawmill_duration': system_state.get('sawmill_duration', 0.0),
+            'wa_status': system_state.get('wa_status', 'Siaga'),
             'rms': system_state['rms'],
             'is_silent': system_state['is_silent'],
             'stats': system_state['stats'],
@@ -452,21 +569,56 @@ def get_live_state():
         }
     return jsonify(data)
 
+@app.route('/api/test_wa', methods=['POST'])
+def test_wa():
+    """Endpoint manual untuk menguji Webhook WhatsApp dengan satu klik."""
+    try:
+        send_whatsapp_alert(
+            duration=10.0,
+            confidence=95.0,
+            prob_sawmil=98.5,
+            rms=0.045
+        )
+        return jsonify({'success': True, 'message': 'Pesan tes sedang dikirim ke Webhook WhatsApp'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/reset', methods=['POST'])
 def reset_state():
     ring_buffer.reset()
     stabilizer.reset()
+    with wa_lock:
+        wa_state['sawmill_start_time'] = None
+        wa_state['consecutive_seconds'] = 0.0
+        wa_state['alert_sent_for_session'] = False
+        wa_state['last_status_message'] = 'Siaga'
     with state_lock:
         system_state['instant_prediction'] = 'Menunggu...'
         system_state['stable_prediction'] = 'Menunggu...'
         system_state['confidence'] = 0.0
         system_state['prob_sawmil'] = 0.0
         system_state['prob_nonsawmil'] = 100.0
+        system_state['sawmill_duration'] = 0.0
+        system_state['wa_status'] = 'Siaga'
         system_state['rms'] = 0.0
         system_state['history_timeline'].clear()
     return jsonify({'success': True, 'message': 'State berhasil direset'})
 
 if __name__ == '__main__':
+    # Mode uji cepat WhatsApp via terminal: python app.py --test-wa
+    if '--test-wa' in sys.argv:
+        print("=================================================================")
+        print("  PENGUJIAN LANGSUNG NOTIFIKASI WHATSAPP")
+        print(f"  Metode: {WA_METHOD}")
+        print(f"  Target: {WA_TARGET_PHONE}")
+        print(f"  URL   : {WEBHOOK_URL}")
+        print("=================================================================")
+        send_whatsapp_alert(duration=10.0, confidence=95.0, prob_sawmil=98.5, rms=0.045)
+        print("[INFO] Menunggu respons server webhook (3 detik)...")
+        time.sleep(3)
+        print("[INFO] Selesai! Silakan cek WhatsApp Anda.")
+        sys.exit(0)
+
     print("=================================================================")
     print("  AUDIO MONITORING & DETECTION (SAWMIL VS NON-SAWMIL)")
     print("  Sliding Window: 2.5s | Hop: 0.5s | Sample Rate: 22050 Hz")
